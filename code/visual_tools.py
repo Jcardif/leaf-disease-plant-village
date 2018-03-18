@@ -241,7 +241,7 @@ class GradCamPlus():
         cam = cam / np.max(cam) # scale 0 to 1.0  #(cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
         cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
         #print(cam)
-        return cam
+        return cam, model_output
 
 class Cam():
     """
@@ -590,7 +590,7 @@ def guided_gradcam(retrained_model, target_layer, img_dataset_loader=None, batch
     
     # Gradcam++
     gcplusv2 = GradCamPlus(retrained_model, target_layer, base_model, usecuda)
-    camplus = gcplusv2.generate_cam(prep_imgv, target_class, draw_acc_pred)
+    camplus, model_output = gcplusv2.generate_cam(prep_imgv, target_class, draw_acc_pred)
     
     
     _=save_class_activation_on_image(original_image, origin_cam, file_name_to_export+'_'+data_sep+'_origin_cam')
@@ -616,15 +616,15 @@ def guided_gradcam(retrained_model, target_layer, img_dataset_loader=None, batch
     
     
     # Guided cam
-    cam_gb = guided_grad_cam(origin_cam, guided_grads)
+    orig_cam_gb = guided_grad_cam(origin_cam, pos_sal)#, guided_grads)
     ##copyfile(img_path,os.path.join('results',file_name_to_export+'_'+data_sep+'.jpg'))
-    save_gradient_images(cam_gb, file_name_to_export +'_'+data_sep+ '_origin_Cam')
-    grayscale_cam_gb = convert_to_grayscale(cam_gb)
-    save_gradient_images(grayscale_cam_gb, file_name_to_export +'_'+data_sep+ '_origin_Cam_gray')
+    save_gradient_images(orig_cam_gb, file_name_to_export +'_'+data_sep+ '_origin_Cam')
+    grayscale_orig_cam_gb = convert_to_grayscale(ori_cam_gb)
+    save_gradient_images(grayscale_orig_cam_gb, file_name_to_export +'_'+data_sep+ '_origin_Cam_gray')
     print('Origin cam completed')
     
     # Guided Grad cam
-    cam_gb = guided_grad_cam(cam, guided_grads)
+    cam_gb = guided_grad_cam(cam, pos_sal)#, guided_grads)
     copyfile(img_path,os.path.join('results',file_name_to_export+'_'+data_sep+'_label_'+str(target_class)+'_pred_'+str(pred_index)+'.jpg'))
     save_gradient_images(cam_gb, file_name_to_export +'_'+data_sep+ '_GGrad_Cam')
     grayscale_cam_gb = convert_to_grayscale(cam_gb)
@@ -634,10 +634,10 @@ def guided_gradcam(retrained_model, target_layer, img_dataset_loader=None, batch
     print('Guided grad cam completed')
     
     # Guided Grad cam++
-    cam_gb = guided_grad_cam(camplus, guided_grads)
+    cam_gb_plus = guided_grad_cam(camplus, pos_sal)#, guided_grads)
     ##copyfile(img_path,os.path.join('results',file_name_to_export+'_'+data_sep+'.jpg'))
-    gradient_cam = save_gradient_images(cam_gb, file_name_to_export +'_'+data_sep+ '_GGrad_Cam_Plus')
-    grayscale_cam_gb = convert_to_grayscale(cam_gb)
-    save_gradient_images(grayscale_cam_gb, file_name_to_export +'_'+data_sep+ '_GGrad_Cam_Plus_gray')
+    gradient_cam = save_gradient_images(cam_gb_plus, file_name_to_export +'_'+data_sep+ '_GGrad_Cam_Plus')
+    grayscale_cam_gb_plus = convert_to_grayscale(cam_gb_plus)
+    save_gradient_images(grayscale_cam_gb_plus, file_name_to_export +'_'+data_sep+ '_GGrad_Cam_Plus_gray')
     print('Guided grad cam++ completed') # #prep_img[0].cpu(),
-    return torch.from_numpy(img_with_gradcam_heatmap.transpose(2, 0, 1)), torch.from_numpy(img_with_gradcamplus_heatmap.transpose(2, 0, 1)), torch.from_numpy(cv2.resize(original_image,(224,224)).transpose(2, 0, 1)), pred_index, target_class, args_sorted_weights
+    return torch.from_numpy(img_with_gradcam_heatmap.transpose(2, 0, 1)) , torch.from_numpy(img_with_gradcamplus_heatmap.transpose(2, 0, 1)), torch.from_numpy(cv2.resize(original_image,(224,224)).transpose(2, 0, 1)), torch.from_numpy(grayscale_cam_gb.transpose(2, 0, 1)), torch.from_numpy(grayscale_cam_gb_plus.transpose(2, 0, 1)), pred_index, target_class, model_output, args_sorted_weights

@@ -40,6 +40,21 @@ def get_result_file_paths(epoch, lr, wd, datasetname, data_separate, archname, d
                 preds_labels_file = os.path.join(logits_dir, 'train_from_realdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
             elif data_type == 'test':
                 preds_labels_file = os.path.join(logits_dir, 'test_from_realdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
+
+        elif is_soft_target=='False' and is_distill=='MSETrue':
+            model_path = os.path.join(model_dir, datasetname+'_'+archname+'_'+str(epoch)+'_MSErealdistilled_'+save_model_per_epoch_suffix)
+            if data_type == 'train':#todo change name according to this
+                preds_labels_file = os.path.join(logits_dir, 'train_from_MSErealdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
+            elif data_type == 'test':
+                preds_labels_file = os.path.join(logits_dir, 'test_from_MSErealdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
+
+        elif is_soft_target=='False' and is_distill=='OnlyMSETrue':
+            model_path = os.path.join(model_dir, datasetname+'_'+archname+'_'+str(epoch)+'_OnlyMSErealdistilled_'+save_model_per_epoch_suffix)
+            if data_type == 'train':#todo change name according to this
+                preds_labels_file = os.path.join(logits_dir, 'train_from_OnlyMSErealdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
+            elif data_type == 'test':
+                preds_labels_file = os.path.join(logits_dir, 'test_from_OnlyMSErealdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
+
         elif is_soft_target=='False' and is_distill=='False':
             model_path = os.path.join(model_dir, datasetname+'_'+archname+'_'+str(epoch)+'_'+save_model_per_epoch_suffix)
             if data_type == 'train':
@@ -71,6 +86,12 @@ def get_result_file_paths(epoch, lr, wd, datasetname, data_separate, archname, d
                 preds_labels_file = os.path.join(logits_dir, 'train_from_bottleneck_realdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
             elif data_type == 'test':
                 preds_labels_file = os.path.join(logits_dir, 'test_from_bottleneck_realdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
+        elif is_soft_target=='False' and is_distill=='MSETrue':
+            model_path = os.path.join(model_dir, datasetname+'_'+archname+'_'+str(epoch)+'_MSErealdistilled_'+save_model_per_epoch_suffix)
+            if data_type == 'train':#todo change name according to this
+                preds_labels_file = os.path.join(logits_dir, 'train_from_bottleneck_MSErealdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
+            elif data_type == 'test':
+                preds_labels_file = os.path.join(logits_dir, 'train_from_bottleneck_MSErealdistill_logits_'+datasetname+'_'+archname+'_'+str(epoch) + '_' + data_separate+save_logits_per_epoch_suffix + '.pt')
         elif is_soft_target=='False' and is_distill=='False':
             model_path = os.path.join(model_dir, datasetname+'_'+archname+'_'+str(epoch)+'_'+save_model_per_epoch_suffix)
             if data_type == 'train':

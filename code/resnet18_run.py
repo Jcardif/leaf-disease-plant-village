@@ -99,7 +99,7 @@ def share_parser():
     return parser
 
 # training
-def train_distilled_model(datasetloader, stumodel, optimizer, CE_loss, Log_softmax, Softmax, NLLL_loss, Prob_target_NLL, epoch, tepochs, T, batch_size, cuda=True, is_soft_target='False', is_distill='False'): #eval_datasetloader,
+def train_distilled_model(datasetloader, stumodel, optimizer, CE_loss, Log_softmax, Softmax, NLLL_loss, Prob_target_NLL, MSE_loss, epoch, tepochs, T, batch_size, cuda=True, is_soft_target='False', is_distill='False'): #eval_datasetloader,
     running_loss = 0.0
     running_corrects = 0
 
@@ -124,6 +124,10 @@ def train_distilled_model(datasetloader, stumodel, optimizer, CE_loss, Log_softm
             loss += softlabel_loss*T*T
         elif is_distill == 'True':
             loss += Prob_target_NLL(Softmax(target_logitsv/T), Log_softmax(logits/T))*T*T #second try
+        elif is_distill == 'MSETrue':
+            loss += Prob_target_NLL(Softmax(target_logitsv/T), Log_softmax(logits/T))*T*T + MSE_loss(logits, target_logitsv)
+        elif is_distill == 'OnlyMSETrue':
+            loss = Prob_target_NLL(Softmax(target_logitsv/T), Log_softmax(logits/T))*T*T + MSE_loss(logits, target_logitsv)
         # backward + optimize
         optimizer.zero_grad()
         loss.backward()
@@ -259,6 +263,7 @@ def main(args,best_loss):
     Log_softmax = nn.LogSoftmax(dim=1)
     Prob_target_NLL = NLLProbTarget()
     Softmax = nn.Softmax(dim=1)
+    MSE_loss = nn.MSELoss()
     if args.has_weights == 'True':
         CE_loss = nn.CrossEntropyLoss(weight=train_class_weights_tensor)
         NLLL_loss = nn.NLLLoss(weight=train_class_weights_tensor)
@@ -271,7 +276,7 @@ def main(args,best_loss):
         Log_softmax = Log_softmax.cuda()
         NLLL_loss = NLLL_loss.cuda()
         Softmax = Softmax.cuda()
-    
+        MSE_loss = MSE_loss.cuda()
     
     
     # optionally resume from a checkpoint
@@ -302,7 +307,7 @@ def main(args,best_loss):
             adjust_learning_rate_resnet101(optimizer, epoch, args.lr, args.rlr)
         themodel.train(True)
         
-        epoch_loss = train_distilled_model(leaf_loader, themodel , optimizer, CE_loss, Log_softmax, Softmax, NLLL_loss, Prob_target_NLL, epoch, args.epochs, T=args.T, batch_size=args.batch_size, cuda=args.cuda, is_soft_target=args.softlogits, is_distill=args.distill)
+        epoch_loss = train_distilled_model(leaf_loader, themodel , optimizer, CE_loss, Log_softmax, Softmax, NLLL_loss, Prob_target_NLL, MSE_loss, epoch, args.epochs, T=args.T, batch_size=args.batch_size, cuda=args.cuda, is_soft_target=args.softlogits, is_distill=args.distill)
         
         themodel.eval()
         
