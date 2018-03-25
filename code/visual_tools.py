@@ -10,9 +10,10 @@ from torch.autograd import Variable
 import os
 import math
 import numpy as np
+from ImageFolderData import default_loader
 irange = range
 def make_grid(tensor, nrow=8, padding=2,
-              normalize=False, range=None, scale_each=False, pad_value=255, predict_list=None, target_list=None):
+              normalize=False, range=None, scale_each=False, pad_value=255, predict_list=None, target_list=None, prob_list=None, write_prob=True):
     """Make a grid of images.
     Args:
         tensor (Tensor or list): 4D mini-batch Tensor of shape (B x C x H x W)
@@ -82,6 +83,10 @@ def make_grid(tensor, nrow=8, padding=2,
     #grid = tensor.new(3, height * ymaps + padding, width * xmaps + padding).fill_(pad_value)
     grid = tensor.new(height * ymaps + padding, width * xmaps + padding, 3).fill_(pad_value)
     writen_words = []
+    writen_probs = []
+    if write_prob==True:
+        for prob in prob_list:
+            writen_probs.append(str(prob))
     if predict_list is not None:
         if target_list is not None:
             for n, predict in enumerate(predict_list):
@@ -96,8 +101,10 @@ def make_grid(tensor, nrow=8, padding=2,
             if k >= nmaps:
                 break
             tensor_np = tensor[k].cpu().numpy().transpose((1, 2, 0)).copy()
-            if x % 3 == 0:# origin pics, gradcam, gradcamplus
-                tensor_with_label = cv2.putText(tensor_np,writen_words[(y*xmaps+x)//3], (0,40), cv2.FONT_HERSHEY_SIMPLEX, 1.5,(255,255,255),3)
+            if x % 5 == 0:# origin pics, gradcam, gradcamplus
+                tensor_with_label = cv2.putText(tensor_np,writen_words[(y*xmaps+x)//5], (0,40), cv2.FONT_HERSHEY_SIMPLEX, 1.5,(255,255,255),3)
+                if write_prob==True:
+                    tensor_with_label = cv2.putText(tensor_np,writen_probs[(y*xmaps+x)//5], (0,215), cv2.FONT_HERSHEY_SIMPLEX, 1.5,(255,255,255),3)
                 tensor_with_label = torch.from_numpy(tensor_with_label)
             else:
                 tensor_with_label = torch.from_numpy(tensor_np) #.transpose((2, 0, 1))
@@ -113,41 +120,46 @@ class CamExtractor():
         Extracts cam features from the model
     """
     def __init__(self, retrained_model, target_layer, base_model=None):
-        self.retrained_model = retrained_model
         self.target_layer = target_layer
-        self.base_model = base_model
         self.gradients = None
-
+        retrained_model.eval()        
+        self.retrained_model = retrained_model
+        if base_model is not None:
+            base_model.eval()
+        self.base_model = base_model
     def save_gradient(self, grad):
         self.gradients = grad
 
     def forward_pass_on_convolutions(self, x):
         """
-            Does a forward pass on convolutions, hooks the function at given layer
+            Does a forward pass on convolutions, hooks the function at the last convolutional layer
+            output of resnet model
         """
         conv_output = None
+        self.retrained_model.eval()
         if self.base_model is not None:
+            self.base_model.eval()
+            
             iteritems = itertools.chain(self.base_model.module._modules.items()
                                            , self.retrained_model.module._modules.items())
+            #test_out = self.retrained_model(self.base_model(x))
         else:
             iteritems = self.retrained_model.module._modules.items()
+            #test_out = self.retrained_model(x)
+        assert self.target_layer.find('layer') != -1
+        layer, bottlenecknum, modulename = self.target_layer.split('/')
         for module_pos, module in iteritems:
             if module_pos != 'fc':
                 x = module(x)
-                if self.target_layer.find('layer') != -1:
-                    layer, bottlenecknum, modulename = self.target_layer.split('/')
-                    if layer == module_pos:
-                        for po, mod in module._modules.items(): # Bottleneck
-                            if po == bottlenecknum:
-                                for p, mo in mod._modules.items(): # what we want
-                                     if p == modulename:
-                                        x.register_hook(self.save_gradient)
-                                        conv_output = x  # Save the convolution output on that layer
-                else:
-                    if module_pos == self.target_layer:
-                        x.register_hook(self.save_gradient)
-                        conv_output = x  # Save the convolution output on that layer
-        return conv_output, x
+                #print(module_pos)
+                #"""
+                if module_pos == layer:
+                    #x.register_hook(self.save_gradient)
+                    x.retain_grad()
+                    conv_output = x
+
+                                          
+        return conv_output, x#, test_out
 
     def forward_pass(self, x):
         """
@@ -155,9 +167,16 @@ class CamExtractor():
         """
         # Forward pass on the convolutions
         conv_output, x = self.forward_pass_on_convolutions(x)
+        #print(conv_output)
         x = x.view(x.size(0), -1)  # Flatten
+
         # Forward pass on the classifier
         x = self.retrained_model.module.fc(x)
+
+        #print(x.data)
+        #print(test_out.data)
+        #assert x.data.cpu().numpy().all() == test_out.data.cpu().numpy().all()
+        
         return conv_output, x
 
 class GradCamPlus():
@@ -192,11 +211,13 @@ class GradCamPlus():
         # Backward pass with specified target
         model_output.backward(gradient=one_hot_output, retain_graph=True, create_graph=True)
         # Get hooked gradients
-        guided_gradientsv = self.extractor.gradients #torch.Size([1, 2048, 7, 7])
+        guided_gradientsv = conv_output.grad#self.extractor.gradients #torch.Size([1, 2048, 7, 7])
         guided_gradients = guided_gradientsv.data.cpu().numpy()[0]
         # Get convolution outputs
         target = conv_output.data.cpu().numpy()[0]
-        
+        #print('gradcamplus')
+        #print(one_hot_output)
+        #print(np.exp(one_hot_output))
         #first_derivative
         first_derivative = np.exp(one_hot_output)[0][target_index]*guided_gradients
         """
@@ -226,70 +247,26 @@ class GradCamPlus():
         alpha_normalization_constant = np.sum(alphas, axis=(1,2))
         #print(alpha_normalization_constant.shape) ## (2048,)
         alphas /= alpha_normalization_constant.reshape((first_derivative.shape[0], 1, 1))
-       
+        #print('camplus alphas')
+        #print(alphas)
         deep_linearization_weights = np.sum((weights*alphas).reshape((first_derivative.shape[0], -1)),axis=1)
         #print(deep_linearization_weights.shape)# (2048,)
         # Create empty numpy array for cam
         grad_CAM_map = np.zeros(target.shape[1:], dtype=np.float32)#np.ones(target.shape[1:], dtype=np.float32)
         # Multiply each weight with its conv output and then, sum
+        #print('camplus weights')
+        #print(deep_linearization_weights)
         for i, w in enumerate(deep_linearization_weights):
             grad_CAM_map += w * target[i, :, :]
         #print(grad_CAM_map.shape) #(7, 7)
         # Passing through ReLU
         cam = np.maximum(grad_CAM_map, 0)#relu
+        cam = cam / cam.max() # scale 0 to 1.0  #(cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
         cam = cv2.resize(cam, (224, 224))
-        cam = cam / np.max(cam) # scale 0 to 1.0  #(cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
+        
         cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
         #print(cam)
         return cam, model_output
-
-class Cam():
-    """
-        Produces class activation map
-    """
-    def __init__(self, retrained_model, target_layer, base_model=None):
-        self.base_model = base_model
-        self.retrained_model = retrained_model
-        if self.base_model is not None:
-            self.base_model.eval()
-        self.retrained_model.eval()
-        # Define extractor
-        self.extractor = CamExtractor(self.retrained_model, target_layer, self.base_model)
-
-    def generate_cam(self, input_image, draw_feature_num=7, target_index=None, draw_acc_pred=True):
-        # Full forward pass
-        # conv_output is the output of convolutions at specified layer
-        # model_output is the final output of the model (1, 1000)
-        conv_output, model_output = self.extractor.forward_pass(input_image)
-        pred_index = np.argmax(model_output.data.cpu().numpy())
-        if target_index is None or (pred_index != target_index and draw_acc_pred):
-            target_index = pred_index
-        
-        # Get convolution outputs
-        target = conv_output.data.cpu().numpy()[0] #(2048, 7, 7)
-        # Get weights from gradients
-        #weights = np.mean(guided_gradients, axis=(1, 2))  # Take averages for each gradient
-        weights = None
-        for k, v in self.retrained_model.module._modules.items():
-            if k.find('fc') != -1:
-                for param in v.parameters():
-                    weights = param.data.cpu().numpy()[target_index] # arxiv 1610.0239 (13)
-                    break
-                        
-        assert weights is not None
-        #print('cam weight: ')
-        #print(weights)
-        # Create empty numpy array for cam
-        cam = np.zeros(target.shape[1:], dtype=np.float32)
-        # Multiply each weight with its conv output and then, sum
-        for i, w in enumerate(weights):
-            cam += w * target[i, :, :]
-        cam = cv2.resize(cam, (224, 224))
-        cam = np.maximum(cam, 0)#relu
-        cam = cam / np.max(cam) # scale 0 to 1.0  #(cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
-        cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
-        
-        return cam
     
 class GradCam():
     """
@@ -325,7 +302,7 @@ class GradCam():
         # Backward pass with specified target
         model_output.backward(gradient=one_hot_output, retain_graph=True)
         # Get hooked gradients
-        guided_gradients = self.extractor.gradients.data.cpu().numpy()[0]
+        guided_gradients = conv_output.grad.data.cpu().numpy()[0]#self.extractor.gradients.data.cpu().numpy()[0]
         # Get convolution outputs
         target = conv_output.data.cpu().numpy()[0]
         # Get weights from gradients
@@ -337,9 +314,10 @@ class GradCam():
         # Multiply each weight with its conv output and then, sum
         for i, w in enumerate(weights):
             cam += w * target[i, :, :]
-        cam = cv2.resize(cam, (224, 224))
+        
         cam = np.maximum(cam, 0)#relu
-        cam = cam / np.max(cam) # scale 0 to 1.0  #(cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
+        cam = cam / cam.max() # scale 0 to 1.0  #(cam - np.min(cam)) / (np.max(cam) - np.min(cam))  # Normalize between 0-1
+        cam = cv2.resize(cam, (224, 224))
         cam = np.uint8(cam * 255)  # Scale between 0-255 to visualize
         args_sorted_weights = None
         if draw_feature_num != 0:
@@ -461,9 +439,9 @@ def save_gradient_images(gradient, file_name):
     gradient = np.uint8(gradient * 255).transpose(1, 2, 0)
     path_to_file = os.path.join('results', file_name + '.jpg')
     # Convert RBG to GBR
-    #gradient = gradient[..., ::-1]
+    gradient = gradient[..., ::-1]
     cv2.imwrite(path_to_file, gradient)
-    #return gradient
+    return gradient
 
 
 def save_class_activation_on_image(org_img, activation_map, file_name):
@@ -543,16 +521,22 @@ def get_positive_negative_saliency(gradient):
     neg_saliency = (np.maximum(0, -gradient) / -gradient.min())
     return pos_saliency, neg_saliency
 
-def guided_gradcam(retrained_model, target_layer, img_dataset_loader=None, batch_ind=None, img_ind=None,  base_model=None, draw_feature_num=7, draw_acc_pred=True, data_sep='', given_img_path=None, classes_to_ind_dict=None, usecuda=True):
+def guided_gradcam(retrained_model, target_layer, img_dataset_loader=None, batch_ind=None, img_ind=None,  base_model=None, draw_feature_num=7, draw_acc_pred=True, data_sep='', given_img_path=None, classes_to_ind_dict=None, usecuda=True, has_target_labels=True):
     if given_img_path is not None:
         img_path = given_img_path
-        cla_name = img_path.split('/')[-2]
-        target_class = classes_to_ind_dict[cla_name]
+        if has_target_labels:
+            cla_name = img_path.split('/')[-2]
+            target_class = classes_to_ind_dict[cla_name]
+        else:
+            target_class = None
         print(img_path)
-        img = cv2.imread(img_path, 1)
+        #img = cv2.imread(img_path, 1)
         #img = cv2.resize(img, (224, 224))
-        img = torchvision.transforms.functional.resize(torchvision.transforms.functional.to_pil_image(img, 'RGB'), (224, 224))
-        #prep_img = torchvision.transforms.functional.to_tensor(img)
+        img = default_loader(img_path)
+
+        # preprocessing is very important
+        img = torchvision.transforms.functional.resize(img, (224, 224))
+        prep_img = torchvision.transforms.functional.to_tensor(img)
         prep_img = torchvision.transforms.functional.normalize(torchvision.transforms.functional.to_tensor(img), [0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         prep_img = torch.unsqueeze(prep_img, 0)
         # preprocessing
@@ -573,14 +557,12 @@ def guided_gradcam(retrained_model, target_layer, img_dataset_loader=None, batch
 
     file_name_to_export = img_path[img_path.rfind('/')+1:img_path.rfind('.')]+'_'+data_sep
 
-    # cam
-    camv2 = Cam(retrained_model, target_layer, base_model) # only support avg+fc layers
-    origin_cam = camv2.generate_cam(prep_imgv, draw_feature_num, target_class, draw_acc_pred)
     # Grad cam
     gcv2 = GradCam(retrained_model, target_layer, base_model, usecuda)
     # Generate cam mask
     cam, pred_index, args_sorted_weights = gcv2.generate_cam(prep_imgv, target_class, draw_feature_num, draw_acc_pred, file_name_to_export)
-    
+    print('cam')
+    print(cam)
 
     if pred_index == target_class:
         file_name_to_export += '_classified_right'
@@ -591,9 +573,8 @@ def guided_gradcam(retrained_model, target_layer, img_dataset_loader=None, batch
     # Gradcam++
     gcplusv2 = GradCamPlus(retrained_model, target_layer, base_model, usecuda)
     camplus, model_output = gcplusv2.generate_cam(prep_imgv, target_class, draw_acc_pred)
-    
-    
-    _=save_class_activation_on_image(original_image, origin_cam, file_name_to_export+'_'+data_sep+'_origin_cam')
+    print('camplus')
+    print(camplus)
     img_with_gradcam_heatmap =save_class_activation_on_image(original_image, cam, file_name_to_export+'_'+data_sep)
     img_with_gradcamplus_heatmap = save_class_activation_on_image(original_image, camplus, file_name_to_export+'_'+data_sep+'_plus')
     print('Grad cam completed')
@@ -615,20 +596,12 @@ def guided_gradcam(retrained_model, target_layer, img_dataset_loader=None, batch
     print('Guided backpropagation completed')
     
     
-    # Guided cam
-    orig_cam_gb = guided_grad_cam(origin_cam, pos_sal)#, guided_grads)
-    ##copyfile(img_path,os.path.join('results',file_name_to_export+'_'+data_sep+'.jpg'))
-    save_gradient_images(orig_cam_gb, file_name_to_export +'_'+data_sep+ '_origin_Cam')
-    grayscale_orig_cam_gb = convert_to_grayscale(ori_cam_gb)
-    save_gradient_images(grayscale_orig_cam_gb, file_name_to_export +'_'+data_sep+ '_origin_Cam_gray')
-    print('Origin cam completed')
-    
     # Guided Grad cam
     cam_gb = guided_grad_cam(cam, pos_sal)#, guided_grads)
     copyfile(img_path,os.path.join('results',file_name_to_export+'_'+data_sep+'_label_'+str(target_class)+'_pred_'+str(pred_index)+'.jpg'))
     save_gradient_images(cam_gb, file_name_to_export +'_'+data_sep+ '_GGrad_Cam')
     grayscale_cam_gb = convert_to_grayscale(cam_gb)
-    save_gradient_images(grayscale_cam_gb, file_name_to_export +'_'+data_sep+ '_GGrad_Cam_gray')
+    grayscale_cam_gb_img = save_gradient_images(grayscale_cam_gb, file_name_to_export +'_'+data_sep+ '_GGrad_Cam_gray')
     #grayscale_cam_gb_minus_healthy = convert_to_grayscale(cam_gb_minus_healthy)
     #save_gradient_images(grayscale_cam_gb_minus_healthy, file_name_to_export + '_GGrad_Cam_gray_minus_healthy')
     print('Guided grad cam completed')
@@ -638,6 +611,6 @@ def guided_gradcam(retrained_model, target_layer, img_dataset_loader=None, batch
     ##copyfile(img_path,os.path.join('results',file_name_to_export+'_'+data_sep+'.jpg'))
     gradient_cam = save_gradient_images(cam_gb_plus, file_name_to_export +'_'+data_sep+ '_GGrad_Cam_Plus')
     grayscale_cam_gb_plus = convert_to_grayscale(cam_gb_plus)
-    save_gradient_images(grayscale_cam_gb_plus, file_name_to_export +'_'+data_sep+ '_GGrad_Cam_Plus_gray')
+    grayscale_cam_gb_plus_img = save_gradient_images(grayscale_cam_gb_plus, file_name_to_export +'_'+data_sep+ '_GGrad_Cam_Plus_gray')
     print('Guided grad cam++ completed') # #prep_img[0].cpu(),
-    return torch.from_numpy(img_with_gradcam_heatmap.transpose(2, 0, 1)) , torch.from_numpy(img_with_gradcamplus_heatmap.transpose(2, 0, 1)), torch.from_numpy(cv2.resize(original_image,(224,224)).transpose(2, 0, 1)), torch.from_numpy(grayscale_cam_gb.transpose(2, 0, 1)), torch.from_numpy(grayscale_cam_gb_plus.transpose(2, 0, 1)), pred_index, target_class, model_output, args_sorted_weights
+    return torch.from_numpy(img_with_gradcam_heatmap.transpose(2, 0, 1)) , torch.from_numpy(img_with_gradcamplus_heatmap.transpose(2, 0, 1)), torch.from_numpy(cv2.resize(original_image,(224,224)).transpose(2, 0, 1)), torch.from_numpy(grayscale_cam_gb_img.transpose(2, 0, 1)[0]), torch.from_numpy(grayscale_cam_gb_plus_img.transpose(2, 0, 1)[0]), pred_index, target_class, model_output, args_sorted_weights

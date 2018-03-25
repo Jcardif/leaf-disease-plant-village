@@ -15,13 +15,13 @@ import os
 import shutil
 import sys
 import random
-import errno
 from PIL import Image
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
     import pickle
 from ResNet18Model import ResNet18FC
+from ResNet101TransferModel import NewModelFromResNet101BottleNeck
 from DataWDistilledLogits import leaf_resnet_train_distill
 from get_result_file_paths import get_saved_logits_fn, get_result_file_paths
 from ProbTargetNLL import NLLProbTarget
@@ -54,7 +54,7 @@ def share_parser():
                         , choices=['train','valid', 'test']
                         , help='chose the data set type (train/test)')
     parser.add_argument('--saveroot',
-                        default='/media/h/15210519917/resnet18'
+                        default='/media/h/resnet18'
                         ,help='path to checkpoint')
     parser.add_argument('--train-size', type=int, default=100, metavar='N',
                        help='input batch size for training (default: 100)')
@@ -170,7 +170,7 @@ def adjust_learning_rate_resnet101(optimizer, epoch, lr, rlr):
         elif i != 1 and lr >= 0.00001:
             param_group['lr'] = lr
 
-def choose_train_hyperparams_acc_arch(model_arch, data_separate, is_distill, saved_logits_filepath, batch_size, kwargs):
+def choose_train_hyperparams_acc_arch(model_arch, data_separate, is_distill, saved_logits_filepath, batch_size, transf_in_dir, kwargs):
     """
     For different model architecture (ResNet18, ResNet101):
     return:
@@ -199,7 +199,9 @@ def choose_train_hyperparams_acc_arch(model_arch, data_separate, is_distill, sav
     elif model_arch == 'resnet101':
         leaf_loader = torch.utils.data.DataLoader(
             leaf_resnet_train_distill(args.dataroot
-                        , logits_path=saved_logits_filepath, data_separate=data_separate
+                        , logits_path=saved_logits_filepath
+                        , data_separate=data_separate
+                        , transf_in_dir=transf_in_dir
                         ,distill_for_model=model_arch
                        ), 
             batch_size=batch_size, shuffle=True, **kwargs)
@@ -207,9 +209,9 @@ def choose_train_hyperparams_acc_arch(model_arch, data_separate, is_distill, sav
         # optimizer
         optimizer = optim.Adam(
             [
-                {'params': themodel.module.layer4.parameters()},
+                {'params': themodel.layer4.parameters()},
                 #{'params': themodel.module.avgpool.parameters()}, # no parameters
-                {'params': themodel.module.fc.parameters(), 'lr': args.rlr}
+                {'params': themodel.fc.parameters(), 'lr': args.rlr}
             ],lr=args.lr, betas=(args.beta1, 0.999), weight_decay=args.wd)
     if args.cuda:
         themodel = torch.nn.DataParallel(themodel).cuda()
@@ -241,10 +243,12 @@ def main(args,best_loss):
         torch.backends.cudnn.benchmark = True
     kwargs = {'num_workers': 2, 'pin_memory': True} if args.cuda else {}
     data_separate = args.dataseparate
-    
+    if os.path.exists(args.saveroot)==False:
+        os.makedirs(args.saveroot, exist_ok=True)
+
     # original model
     saved_logits_filepath = os.path.join(args.dataroot, 'train_results_avg_models_logits_for_distill_'+data_separate+'.pt')
-    themodel, leaf_loader, optimizer = choose_train_hyperparams_acc_arch(args.arch, data_separate, args.distill, saved_logits_filepath, args.batch_size, kwargs)
+    themodel, leaf_loader, optimizer = choose_train_hyperparams_acc_arch(args.arch, data_separate, args.distill, saved_logits_filepath, args.batch_size,args.transferinputdir, kwargs)
     print('traing data size: %d' % leaf_loader.dataset.__len__())
 
     # get the weight for the loss on each class

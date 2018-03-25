@@ -98,7 +98,7 @@ def main(args):
         transfer_model.train(True)
         model_path = os.path.join(model_dir, data_separate+'_'+str(epoch)+'.pth.tar')
         best_path = os.path.join(model_dir, data_separate+'_best.pth.tar')
-        epoch_loss = train_distilled_model(leaf_train_loader, transfer_model , optimizer, CE_loss, None, None, None, None, epoch, args.epochs, T=1.0, batch_size=args.batch_size, cuda=args.cuda, is_soft_target=args.softlogits, is_distill=args.distill)
+        epoch_loss = train_distilled_model(leaf_train_loader, transfer_model , optimizer, CE_loss, None, None, None, None, None, epoch, args.epochs, T=1.0, batch_size=args.batch_size, cuda=args.cuda, is_soft_target=args.softlogits, is_distill=args.distill)
         
         transfer_model.eval()
         

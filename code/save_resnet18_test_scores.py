@@ -15,7 +15,6 @@ import os
 import shutil
 import sys
 import random
-import errno
 from ImageFolderData import ImageFolder
 from Resnet101Layer4DinputData import leaf_resnet_eval_layer_tensor
 from get_result_file_paths import get_result_file_paths
@@ -160,7 +159,9 @@ def main(args):
     #for data_sep in ['10-90']:#,'20-80','40-60','50-50', '60-40','80-20']:
     is_soft_target = args.softlogits
     data_sep = args.dataseparate
-    
+    if os.path.exists(args.saveroot)==False:
+        os.makedirs(args.saveroot, exist_ok=True)
+
     CE_loss = nn.CrossEntropyLoss()
     if args.cuda:
         CE_loss = CE_loss.cuda()
