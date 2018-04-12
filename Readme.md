@@ -1,7 +1,12 @@
+# Web Demo
+
+https://leafweb.herokuapp.com
+
+
 # Reference
 
 ```
-@ARTICLE{koon,
+@ARTICLE{under_review,
 	author  = {Xu, H and Zhao, C G}, 
 	title   = {Softer loss transfer distilling and saliency detection for image-based plant diseases diagnosis}, 
 	journal = {}, 
